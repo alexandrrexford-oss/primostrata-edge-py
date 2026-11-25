@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import platform
 import sys
 from dataclasses import dataclass
 from typing import Iterable, Tuple
@@ -34,12 +35,22 @@ def _default_lib_path() -> str:
     if env_path and os.path.isfile(env_path):
         return env_path
     here = os.path.dirname(os.path.abspath(__file__))
+    arch = platform.machine().lower()
+    is_arm64 = arch in ("aarch64", "arm64")
     if os.name == "nt":
-        names = ("primostrata_edge.dll",)
+        names = ("primostrata_edge_win_arm64.dll", "primostrata_edge.dll") if is_arm64 else ("primostrata_edge.dll",)
     elif sys.platform == "darwin":
-        names = ("libprimostrata_edge.dylib", "libprimostrata_edge.so")
+        names = (
+            ("libprimostrata_edge_darwin_arm64.dylib", "libprimostrata_edge.dylib")
+            if is_arm64
+            else ("libprimostrata_edge_darwin_amd64.dylib", "libprimostrata_edge.dylib")
+        )
     else:
-        names = ("libprimostrata_edge.so",)
+        names = (
+            ("libprimostrata_edge_linux_arm64.so", "libprimostrata_edge.so")
+            if is_arm64
+            else ("libprimostrata_edge.so", "libprimostrata_edge_linux_amd64.so")
+        )
     candidates = [os.path.join(here, n) for n in names] + [
         os.path.abspath(os.path.join(here, "..", "rust_ffi", "target", "release", n))
         for n in names

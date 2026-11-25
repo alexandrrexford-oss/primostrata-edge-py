@@ -83,6 +83,28 @@ In-process native wrapper used directly or via `PrimostrataEdgeMiddleware`.
 
 ---
 
+## `PrimoStore` (`primostrata_edge.store`)
+
+Crash-safe `CubePoint64` WAL key-value & atomic counter store (`durable_sync=True` for `fsync` per write):
+
+- `put(key, val) -> None`
+- `get(key) -> bytes | None`
+- `decr_if_ge(key, qty, init_if_missing=0) -> tuple[bool, int]` — atomic check-and-decrement inventory counter.
+- `get_counter(key) -> int | None`
+- `flush() -> None` / `stats() -> tuple[int, int]` (`seq, records`) / `close() -> None`
+
+---
+
+## `PrimoSearch` (`primostrata_edge.search`)
+
+Hybrid ALX-24 lexical + cross-script phonetic conduit + VEC31 2-bit ANN search index:
+
+- `add_doc(doc_id, text, vec64=None) -> None`
+- `query(text="", top_k=10, vec64=None) -> list[tuple[int, int]]` — returns `(doc_id, score)` sorted descending.
+- `close() -> None`
+
+---
+
 ## `PrimostrataEdgeMiddleware` (`primostrata_edge.middleware`)
 
 Starlette / FastAPI `BaseHTTPMiddleware` adapter:

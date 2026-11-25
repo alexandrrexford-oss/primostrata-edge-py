@@ -109,13 +109,19 @@ End-to-end storefront (`GET /`), SSR concert detail with `<script>` sanitization
 - Mixed workload (`15,000` req, cache hits + misses + attacks): `81,594 req/s` (`p50 7.20 us`) vs `45,384 req/s` (`p50 17.80 us`)
 - Uncached dynamic miss (`5,000` x 4792B HTML strip + compress + AEAD): `28,264 req/s` vs `30,520 req/s` (`zlib` + `cryptography`)
 
+### `PrimoStore` & `PrimoSearch` vs SQLite WAL & FTS5 (`bench_alx_and_store.py`)
+
+- **Crash-safe WAL (`PrimoStore`):** `CubePoint64` frames recover intact records fail-closed on torn tails (`999/1000` tested), running atomic `decr_if_ge`, `put`, and `get` in native Rust memory/WAL without SQL overhead.
+- **Cross-script hybrid search (`PrimoSearch`):** ALX-24 phonetic conduits + VEC31 2-bit ANN match Cyrillic queries (`"Алматы синтвейв арена"`) against Latin documents (`"Synthwave Neon Tour in Almaty Arena..."`) in addition to exact token scoring.
+
 ## Run tests and benchmarks
 
 ```bash
 python -m pytest -v tests/
 python bench_compare.py
+python bench_alx_and_store.py
 python bench_external_intl.py
 python -m examples.concert_booking.run_and_verify
 ```
 
-Prebuilt native libraries are included for Windows x86_64 and Linux x86_64 (`primostrata_edge/`); Rust engine sources are closed.
+Prebuilt native libraries are included for Windows `x86_64` (`primostrata_edge.dll`), Linux `x86_64` (`libprimostrata_edge.so`), and Linux `ARM64` (`libprimostrata_edge_linux_arm64.so`); Rust engine sources are closed.
