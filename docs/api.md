@@ -78,6 +78,8 @@ In-process native wrapper used directly or via `PrimostrataEdgeMiddleware`.
 - `strip_scripts(html) -> bytes` — removes `<script>...</script>` blocks in native code.
 - `compress(data, level=1) -> bytes` / `decompress(data) -> bytes` — lossless `ZIN` codec roundtrip.
 - `seal(key32, nonce12, aad, plaintext) -> bytes` / `open(key32, nonce12, aad, wire) -> bytes` — `ChaCha20-Poly1305` AEAD.
+- `seal_wave(key32, nonce12, aad, plaintext, rounds=None, contour="a") -> bytes` / `open_wave(..., contour="a") -> bytes` — **Contour A (default):** pure `WaveCipher31-512` CTR + `WaveCipher31-256` 128-bit MAC (zero ChaCha20); optional **`contour="b"`** enables the dual-layer `WaveCipher31-256 + ChaCha20-Poly1305` hybrid cascade.
+- `WaveTicketSession(root_key, epoch_id=1, max_tickets=1024, rounds=4)` — stateful BWTE-24 ticket session (`seal_next(aad, pt)`, `open(aad, wire)`) with 8 wave subkeys, finite ticket quota (`EdgeRateLimitedError`), and 64-ticket UDP anti-replay window.
 - `handle_request(url, headers, html, key, nonce, aad, flow_hash=1, epoch_sec=1, rate_limit_per_sec=0, cacheable=True) -> EdgeResult` — single FFI call executing rate-limit, L4/L7 check, `<script>` strip, `ZIN` compression, cache lookup/store, and AEAD seal. Raises `EdgeBlockedError` or `EdgeRateLimitedError`.
 - `reset() -> None` / `close() -> None`.
 

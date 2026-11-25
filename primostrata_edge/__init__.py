@@ -9,6 +9,7 @@ from .sdk import (
     EdgeRateLimitedError,
     EdgeResult,
     PrimostrataEdge,
+    WaveTicketSession,
 )
 from .search import PrimoSearch
 from .store import PrimoStore
@@ -24,4 +25,5 @@ __all__ = [
     "PrimostrataEdge",
     "PrimostrataRequest",
     "PrimostrataResponse",
+    "WaveTicketSession",
 ]

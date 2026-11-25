@@ -160,6 +160,54 @@ def _load_cdylib(path: str) -> ctypes.CDLL:
     ]
     lib.primo_edge_process_request.restype = ctypes.c_int32
 
+    lib.primo_wave31_seal.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint8,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+    ]
+    lib.primo_wave31_seal.restype = ctypes.c_int32
+
+    lib.primo_wave31_open.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint8,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+    ]
+    lib.primo_wave31_open.restype = ctypes.c_int32
+
+    lib.primo_wave_cascade_seal.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint8,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+    ]
+    lib.primo_wave_cascade_seal.restype = ctypes.c_int32
+
+    lib.primo_wave_cascade_open.argtypes = [
+        ctypes.c_char_p, ctypes.c_char_p, ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint8,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+    ]
+    lib.primo_wave_cascade_open.restype = ctypes.c_int32
+
+    lib.primo_wave_ticket_create.argtypes = [ctypes.c_char_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint8]
+    lib.primo_wave_ticket_create.restype = ctypes.c_void_p
+
+    lib.primo_wave_ticket_destroy.argtypes = [ctypes.c_void_p]
+    lib.primo_wave_ticket_destroy.restype = None
+
+    lib.primo_wave_ticket_seal.argtypes = [
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+    ]
+    lib.primo_wave_ticket_seal.restype = ctypes.c_int32
+
+    lib.primo_wave_ticket_open.argtypes = [
+        ctypes.c_void_p, ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t,
+        ctypes.c_char_p, ctypes.c_size_t, ctypes.POINTER(ctypes.c_size_t),
+    ]
+    lib.primo_wave_ticket_open.restype = ctypes.c_int32
+
     return lib
 
 
@@ -324,6 +372,49 @@ class PrimostrataEdge:
             raise ValueError(f"AEAD authentication failed rc={rc}")
         return ctypes.string_at(self._out_buf, self._out_len.value)
 
+    def seal_wave(
+        self,
+        key: bytes,
+        nonce: bytes,
+        aad: bytes,
+        plaintext: bytes,
+        rounds: int | None = None,
+        contour: str = "a",
+    ) -> bytes:
+        """Contour A default (pure WaveCipher31-512 + MAC, zero ChaCha20) or optional contour='b' cascade."""
+        if len(key) != 32 or len(nonce) != 12:
+            raise ValueError("key must be 32 bytes and nonce must be 12 bytes")
+        r = (8 if contour.lower() == "b" else 4) if rounds is None else rounds
+        fn = self._lib.primo_wave_cascade_seal if contour.lower() == "b" else self._lib.primo_wave31_seal
+        rc = fn(key, nonce, aad, len(aad), plaintext, len(plaintext), r, self._out_buf, self._buf_cap, ctypes.byref(self._out_len))
+        if rc == ERR_BUFFER_TOO_SMALL:
+            self._ensure_cap(self._out_len.value)
+            rc = fn(key, nonce, aad, len(aad), plaintext, len(plaintext), r, self._out_buf, self._buf_cap, ctypes.byref(self._out_len))
+        if rc != OK_ALLOW_OR_HIT:
+            raise RuntimeError(f"seal_wave failed rc={rc}")
+        return ctypes.string_at(self._out_buf, self._out_len.value)
+
+    def open_wave(
+        self,
+        key: bytes,
+        nonce: bytes,
+        aad: bytes,
+        wire: bytes,
+        rounds: int | None = None,
+        contour: str = "a",
+    ) -> bytes:
+        if len(key) != 32 or len(nonce) != 12:
+            raise ValueError("key must be 32 bytes and nonce must be 12 bytes")
+        r = (8 if contour.lower() == "b" else 4) if rounds is None else rounds
+        fn = self._lib.primo_wave_cascade_open if contour.lower() == "b" else self._lib.primo_wave31_open
+        rc = fn(key, nonce, aad, len(aad), wire, len(wire), r, self._out_buf, self._buf_cap, ctypes.byref(self._out_len))
+        if rc == ERR_BUFFER_TOO_SMALL:
+            self._ensure_cap(self._out_len.value)
+            rc = fn(key, nonce, aad, len(aad), wire, len(wire), r, self._out_buf, self._buf_cap, ctypes.byref(self._out_len))
+        if rc != OK_ALLOW_OR_HIT:
+            raise ValueError(f"WaveCipher31 authentication failed rc={rc}")
+        return ctypes.string_at(self._out_buf, self._out_len.value)
+
     def handle_request(
         self,
         url: str | bytes,
@@ -394,3 +485,79 @@ class PrimostrataEdge:
             cache_hit=(rc == OK_ALLOW_OR_HIT),
             sealed_wire=ctypes.string_at(self._out_buf, self._out_len.value),
         )
+
+
+class WaveTicketSession:
+    """Stateful BWTE-24 Contour A ticket session (8 wave keys, finite ticket quota, 64-ticket replay window)."""
+
+    def __init__(
+        self,
+        root_key: bytes,
+        epoch_id: int = 1,
+        max_tickets: int = 1024,
+        rounds: int = 4,
+        lib_path: str | None = None,
+        buf_bytes: int = 65_536,
+    ) -> None:
+        if len(root_key) != 32:
+            raise ValueError("root_key must be 32 bytes")
+        self._lib = _load_cdylib(lib_path or _default_lib_path())
+        self._handle = self._lib.primo_wave_ticket_create(root_key, epoch_id, max_tickets, rounds)
+        if not self._handle:
+            raise ValueError("Failed to initialize WaveTicketSession")
+        self._buf_cap = buf_bytes
+        self._out_buf = ctypes.create_string_buffer(buf_bytes)
+        self._out_len = ctypes.c_size_t(0)
+
+    def close(self) -> None:
+        if getattr(self, "_handle", None):
+            self._lib.primo_wave_ticket_destroy(self._handle)
+            self._handle = None
+
+    def __enter__(self) -> "WaveTicketSession":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        self.close()
+
+    def _ensure_cap(self, needed: int) -> None:
+        if needed > self._buf_cap:
+            self._buf_cap = max(needed, self._buf_cap * 2)
+            self._out_buf = ctypes.create_string_buffer(self._buf_cap)
+
+    def seal_next(self, aad: bytes, plaintext: bytes) -> bytes:
+        rc = self._lib.primo_wave_ticket_seal(
+            self._handle, aad, len(aad), plaintext, len(plaintext),
+            self._out_buf, self._buf_cap, ctypes.byref(self._out_len),
+        )
+        if rc == ERR_BUFFER_TOO_SMALL:
+            self._ensure_cap(self._out_len.value)
+            rc = self._lib.primo_wave_ticket_seal(
+                self._handle, aad, len(aad), plaintext, len(plaintext),
+                self._out_buf, self._buf_cap, ctypes.byref(self._out_len),
+            )
+        if rc == ERR_RATE_LIMITED:
+            raise EdgeRateLimitedError("Ticket budget exhausted (rotate epoch)")
+        if rc != OK_ALLOW_OR_HIT:
+            raise RuntimeError(f"WaveTicketSession seal failed rc={rc}")
+        return ctypes.string_at(self._out_buf, self._out_len.value)
+
+    def open(self, aad: bytes, wire: bytes) -> bytes:
+        rc = self._lib.primo_wave_ticket_open(
+            self._handle, aad, len(aad), wire, len(wire),
+            self._out_buf, self._buf_cap, ctypes.byref(self._out_len),
+        )
+        if rc == ERR_BUFFER_TOO_SMALL:
+            self._ensure_cap(self._out_len.value)
+            rc = self._lib.primo_wave_ticket_open(
+                self._handle, aad, len(aad), wire, len(wire),
+                self._out_buf, self._buf_cap, ctypes.byref(self._out_len),
+            )
+        if rc == ERR_RATE_LIMITED:
+            raise EdgeRateLimitedError("Ticket replay, budget overflow, or wrong epoch")
+        if rc != OK_ALLOW_OR_HIT:
+            raise ValueError(f"WaveTicketSession auth failed rc={rc}")
+        return ctypes.string_at(self._out_buf, self._out_len.value)
