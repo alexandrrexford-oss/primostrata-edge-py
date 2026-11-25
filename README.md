@@ -1,114 +1,102 @@
-# Primostrata Edge SDK for Python
+# primostrata-edge
 
-Compiled native Rust web runtime, **L4/L7 WAF (`SHIELD`)**, **per-core `REG 0.7` async I/O multiplexer**, **edge cache (`STORE64`)**, **`ZIN` lossless compression**, **`ChaCha20-Poly1305` AEAD**, and dual **`HTTP/1.1` + `PRM1` binary wire protocol** exposed as a standalone cross-platform binary Python package (prebuilt binaries included for **Windows `x86_64`** `.dll` and **Linux `x86_64-unknown-linux-gnu`** `.so`; core Rust engine sources remain proprietary).
+Fast HTTP/1.1 + binary `PRM1` web runtime and L4/L7 edge security SDK for Python, shipped as compiled native binaries (`primostrata_edge.dll` for Windows x64, `libprimostrata_edge.so` for Linux x64) with a pure-Python reference implementation for parity testing and benchmarking.
 
----
+## What's in this repository
 
-## Key Features
+- `primostrata_edge/`
+  - `app.py` — `PrimostrataApp` (native HTTP/1.1 + `PRM1` server, `@app.get`/`@app.post`, `def` and `async def` routes, typed path/query params with `422` validation, `orjson` responses, `/openapi.json`, `/docs`), `PrimostrataClient`.
+  - `sdk.py` — `PrimostrataEdge` low-level bindings (request inspection, `<script>` stripping, `ZIN` compression, `ChaCha20-Poly1305` AEAD, rate limiting).
+  - `middleware.py` — `PrimostrataEdgeMiddleware` for existing FastAPI/Starlette apps.
+  - `primostrata_edge.dll` / `libprimostrata_edge.so` — prebuilt native core.
+- `pure_python_edge/` — functional equivalent in Python (`ipaddress`, `re`, `zlib`, `cryptography`, `OrderedDict`) implementing the same checks and pipeline.
+- `tests/` — parity tests between native SDK and pure Python, HTTP/1.1 + `PRM1` server checks, `async/await` concurrency (`24` concurrent clients across `4` workers), and rate limits (`6/6` passing).
+- `bench_*.py` — reproducible benchmark scripts (`bench_compare.py`, `bench_top_python.py`, `bench_external_intl.py` for `oha` and `k6`).
 
-- **`PrimostrataApp` — Drop-in Web Framework (replaces `FastAPI + Uvicorn`)**
-  - Non-blocking TCP/HTTP/1.1 keep-alive multiplexer (`REG 0.7` per-core worker scheduling) — L4/L7 inspection, rate limiting, static routes, HTML `<script>` stripping, and cached responses run in native Rust **before touching the Python GIL**.
-  - Supports both `def` and `async def` handlers (inline coroutine fast-path + automatic background `asyncio` event loop fallback for `await` I/O), typed path/query parameters with `422` validation, `orjson` serialization, auto `/openapi.json` & `/docs`, and `@app.middleware`.
-  - Simultaneous **`PRM1` Binary Wire** on the same port (`PrimostrataClient`) with optional `ZIN` response compression.
-- **`PrimostrataEdge` — Embedded Edge SDK & `PrimostrataEdgeMiddleware` for FastAPI/Starlette**
-  - L4/L7 security inspection (IPv4/IPv6 SSRF including decimal/hex/octal obfuscation, `CL+TE`/duplicate `Content-Length` HTTP smuggling, traversal, CRLF injection, SQLi/XSS).
-  - Single-pass `<script>` stripping, `ZIN` compression, `ChaCha20-Poly1305` AEAD seal/open, and per-flow rate limiting.
-- **`pure_python_edge` — Full Pure-Python Reference Equivalent**
-  - Complete functional equivalent (`ipaddress`, `re`, `zlib`, `cryptography`, `OrderedDict`) included for parity testing and apples-to-apples benchmarking.
+## Usage
 
----
-
-## Architecture Highlights (Public Overview)
-
-To keep the core engine proprietary while allowing any team to audit behavior and latency independently:
-
-- **Pre-GIL Edge Termination:** Non-blocking socket multiplexing, HTTP/1.1 framing, L4/L7 security checks (`SHIELD`), rate limiting, static responses, and edge cache hits all finish inside compiled native workers without acquiring the Python GIL.
-- **Per-Core Lock-Free Isolation:** Worker cores are routed by compact request/flow signatures (`REG 0.7`) and maintain their own pre-allocated compression scratch buffers and local response caches — eliminating cross-thread lock contention and cache-line bouncing on the hot path.
-- **Zero-Overhead Coroutine Dispatch:** `async def` handlers without runtime suspension run inline via fast coroutine stepping, while handlers that actually `await` async I/O offload cleanly onto a persistent background `asyncio` event loop without blocking socket workers.
-- **Dual-Protocol Single Port (`HTTP/1.1` + `PRM1`):** Standard HTTP clients (`curl`, browsers, `oha`, `k6`, `httpx`) and native `PrimostrataClient` binary streams share the same listening socket transparently, backed by `ZIN` lossless compression and RFC 8439 `ChaCha20-Poly1305` AEAD.
-- **Open Verification:** All security edge cases, functional roundtrips, pure-Python baseline comparisons, and external `oha` / `k6` benchmark harnesses are open in this repo so every claim is locally reproducible.
-
----
-
-## Quickstart
+### Standalone web server (`PrimostrataApp`)
 
 ```python
 import asyncio
 from primostrata_edge import PrimostrataApp
 
 app = PrimostrataApp(workers=4)
-app.static("/health", {"status": "ok", "engine": "primostrata"})
+app.static("/health", {"status": "ok"})
 
 @app.get("/users/{uid}")
 async def get_user(uid: int, page: int = 1):
-    return {"uid": uid, "page": page, "role": "merchant"}
+    return {"uid": uid, "page": page}
 
-@app.get("/async-io")
-async def slow_io():
+@app.get("/io")
+async def async_io():
     await asyncio.sleep(0.01)
-    return {"awaited": True}
+    return {"done": True}
 
 if __name__ == "__main__":
     app.serve(host="127.0.0.1", port=8080)
 ```
 
----
+### As FastAPI/Starlette middleware
 
-## Verified Parity Tests
+```python
+from fastapi import FastAPI
+from primostrata_edge.middleware import PrimostrataEdgeMiddleware
 
-```bash
-python -m pytest -v tests/
+app = FastAPI()
+app.add_middleware(PrimostrataEdgeMiddleware)
 ```
 
-Covers all security vectors (honest traffic, SSRF IPv4/IPv6/decimal/hex/octal/userinfo/`.internal`, traversal, CRLF, SQLi/XSS, HTTP smuggling), cache hit/miss & AEAD roundtrip/tamper rejection, rate limiting, FastAPI middleware parity, high-concurrency `async def` (`await asyncio.sleep`), and `PRM1` binary wire (`6/6` tests passing).
+## How the package works
 
----
+- Socket multiplexing, HTTP/1.1 keep-alive parsing, L4/L7 validation (IPv4/IPv6 SSRF including obfuscated decimal/hex/octal IPs, `CL+TE` / duplicate `Content-Length` smuggling, traversal, CRLF, SQLi/XSS), rate limiting, static routes, and cached `GET` responses run inside the native binary before acquiring the Python GIL.
+- Each native worker core maintains its own pre-allocated compression scratch buffer and local response cache keyed by request/flow signatures to avoid cross-thread lock contention.
+- `async def` handlers without suspension points run inline via `coro.send(None)`; handlers that `await` I/O automatically dispatch to a background `asyncio` loop thread without blocking socket workers.
+- Binary `PRM1` requests (`PrimostrataClient`) share the same TCP port alongside standard HTTP/1.1.
 
-## Reproducible Benchmarks (Windows `x86_64`, Python 3.14)
+## Benchmarks
 
-All multi-server web benchmarks run each server in its own isolated subprocess (`workers=4` / `runtime-threads=4`) driven by external Rust **`oha 1.17.0`** and Go **`k6 2.4.0`**. `PrimostrataApp` keeps `SHIELD` WAF + `EdgeGate` enabled on **every request**, while bare baselines run with **no WAF**.
+Environment: Windows 11 x86_64, Python 3.14.7. Each server runs in its own isolated subprocess (`4` workers / `4` runtime threads), driven externally by **`oha 1.17.0`** and **`k6 2.4.0`**. `PrimostrataApp` runs with L4/L7 WAF enabled on every request; bare baselines run without WAF.
 
-### 1. `[oha 1.17.0]` Static / `const=True` `/health` (`c=32`, 3s HTTP/1.1 Keep-Alive)
+### `oha 1.17.0`: `GET /health` (`c=32`, 3s keep-alive)
 
-| Stack | RPS | Avg | p50 | p90 | p99 | `HTTP 200` |
+| Stack | RPS | Avg | p50 | p90 | p99 | `200 OK` |
 |---|---:|---:|---:|---:|---:|---:|
-| `Uvicorn(w=4)+FastAPI (NO WAF)` | `16,391.9 req/s` | `1.95 ms` | `1.94 ms` | `2.47 ms` | `3.38 ms` | `49,208` |
-| `Granian(t=4)+BlackSheep (NO WAF)` | `7,321.6 req/s` | `4.37 ms` | `4.34 ms` | `4.78 ms` | `5.40 ms` | `22,050` |
-| `Granian(t=4)+BlackSheep + WAF` | `5,424.8 req/s` | `5.89 ms` | `5.84 ms` | `6.35 ms` | `7.84 ms` | `16,318` |
-| `Robyn(w=4, const+dyn, NO WAF)` | `97,720.0 req/s` | `0.32 ms` | `0.28 ms` | `0.50 ms` | `0.79 ms` | `293,698` |
-| **`PrimostrataApp(w=4, REG+SHIELD)`** | **`116,689.3 req/s`** | **`0.27 ms`** | **`0.25 ms`** | **`0.37 ms`** | **`0.64 ms`** | **`350,872`** |
+| `Uvicorn(w=4) + FastAPI (no WAF)` | `16,391.9` | `1.95 ms` | `1.94 ms` | `2.47 ms` | `3.38 ms` | `49,208` |
+| `Granian(t=4) + BlackSheep (no WAF)` | `7,321.6` | `4.37 ms` | `4.34 ms` | `4.78 ms` | `5.40 ms` | `22,050` |
+| `Granian(t=4) + BlackSheep + WAF` | `5,424.8` | `5.89 ms` | `5.84 ms` | `6.35 ms` | `7.84 ms` | `16,318` |
+| `Robyn(w=4, const=True, no WAF)` | `97,720.0` | `0.32 ms` | `0.28 ms` | `0.50 ms` | `0.79 ms` | `293,698` |
+| `PrimostrataApp(w=4, +WAF)` | `116,689.3` | `0.27 ms` | `0.25 ms` | `0.37 ms` | `0.64 ms` | `350,872` |
 
-### 2. `[oha 1.17.0]` Async Dynamic `/users/{uid}` (`c=32`, 3s Keep-Alive — Python invoked per request)
+### `oha 1.17.0`: `GET /users/42` dynamic `async def` (`c=32`, 3s keep-alive)
 
-| Stack | RPS | Avg | p50 | p90 | p99 | `HTTP 200` |
+| Stack | RPS | Avg | p50 | p90 | p99 | `200 OK` |
 |---|---:|---:|---:|---:|---:|---:|
-| `Uvicorn(w=4)+FastAPI (NO WAF)` | `15,066.0 req/s` | `2.12 ms` | `2.18 ms` | `2.56 ms` | `3.04 ms` | `45,396` |
-| `Granian(t=4)+BlackSheep (NO WAF)` | `7,263.4 req/s` | `4.40 ms` | `4.38 ms` | `4.77 ms` | `5.25 ms` | `21,772` |
-| `Granian(t=4)+BlackSheep + WAF` | `5,410.2 req/s` | `5.91 ms` | `5.89 ms` | `6.35 ms` | `6.96 ms` | `16,224` |
-| `Robyn(w=4, const+dyn, NO WAF)` | `11,698.0 req/s` | `2.73 ms` | `2.61 ms` | `3.17 ms` | `5.29 ms` | `35,239` |
-| **`PrimostrataApp(w=4, REG+SHIELD)`** | **`15,417.7 req/s`** | **`2.07 ms`** | **`2.03 ms`** | **`2.57 ms`** | **`3.20 ms`** | **`46,295`** |
+| `Uvicorn(w=4) + FastAPI (no WAF)` | `15,066.0` | `2.12 ms` | `2.18 ms` | `2.56 ms` | `3.04 ms` | `45,396` |
+| `Granian(t=4) + BlackSheep (no WAF)` | `7,263.4` | `4.40 ms` | `4.38 ms` | `4.77 ms` | `5.25 ms` | `21,772` |
+| `Granian(t=4) + BlackSheep + WAF` | `5,410.2` | `5.91 ms` | `5.89 ms` | `6.35 ms` | `6.96 ms` | `16,224` |
+| `Robyn(w=4, dynamic, no WAF)` | `11,698.0` | `2.73 ms` | `2.61 ms` | `3.17 ms` | `5.29 ms` | `35,239` |
+| `PrimostrataApp(w=4, +WAF)` | `15,417.7` | `2.07 ms` | `2.03 ms` | `2.57 ms` | `3.20 ms` | `46,295` |
 
-### 3. `[k6 2.4.0]` Mixed Edge Traffic (50% Static `/health` + 20% Dynamic `/users/{uid}` + 30% L7 Attacks, 20 VUs, 4s)
+### `k6 2.4.0`: mixed traffic (50% static, 20% dynamic, 30% L7 attacks, 20 VUs, 4s)
 
-| Stack | RPS | Avg | p50 | p90 | p99 | Total / Checks |
+| Stack | RPS | Avg | p50 | p90 | p99 | Requests / Checks |
 |---|---:|---:|---:|---:|---:|---|
-| `Uvicorn(w=4)+FastAPI (NO WAF)` | `12,866.9 req/s` | `1.47 ms` | `1.47 ms` | `2.21 ms` | `3.05 ms` | `51,493 (100%)` |
-| `Granian(t=4)+BlackSheep (NO WAF)` | `6,764.5 req/s` | `2.88 ms` | `2.73 ms` | `3.31 ms` | `4.15 ms` | `27,077 (100%)` |
-| `Granian(t=4)+BlackSheep + WAF` | `5,856.3 req/s` | `3.33 ms` | `3.22 ms` | `4.20 ms` | `5.66 ms` | `23,443 (100%)` |
-| `Robyn(w=4, const+dyn, NO WAF)` | `24,778.9 req/s` | `0.72 ms` | `0.66 ms` | `1.51 ms` | `2.53 ms` | `99,180 (100%)` |
-| **`PrimostrataApp(w=4, REG+SHIELD)`** | **`38,099.7 req/s`** | **`0.39 ms`** | **`0.00 ms*`** | **`1.01 ms`** | **`2.51 ms`** | **`152,431 (100%)`** |
+| `Uvicorn(w=4) + FastAPI (no WAF)` | `12,866.9` | `1.47 ms` | `1.47 ms` | `2.21 ms` | `3.05 ms` | `51,493 (100%)` |
+| `Granian(t=4) + BlackSheep (no WAF)` | `6,764.5` | `2.88 ms` | `2.73 ms` | `3.31 ms` | `4.15 ms` | `27,077 (100%)` |
+| `Granian(t=4) + BlackSheep + WAF` | `5,856.3` | `3.33 ms` | `3.22 ms` | `4.20 ms` | `5.66 ms` | `23,443 (100%)` |
+| `Robyn(w=4, no WAF)` | `24,778.9` | `0.72 ms` | `0.66 ms` | `1.51 ms` | `2.53 ms` | `99,180 (100%)` |
+| `PrimostrataApp(w=4, +WAF)` | `38,099.7` | `0.39 ms` | `0.00 ms*` | `1.01 ms` | `2.51 ms` | `152,431 (100%)` |
 
-*\*`k6` on Windows reports `0.00 ms` when median response latency is sub-millisecond (`avg = 0.39 ms`).*
+*\*`k6` reports `0.00 ms` on Windows when median latency is sub-millisecond (`avg = 0.39 ms`).*
 
-### 4. In-Process SDK Pipeline vs Pure-Python Equivalent (`bench_compare.py`)
+### In-process SDK vs `pure_python_edge` (`bench_compare.py`)
 
-- **L4/L7 WAF + SSRF + Smuggling (`20,000` req):** `PrimostrataEdge` **`346,494 req/s`** (`p99 5.10 us`) vs `PurePythonEdge` `73,430 req/s` (`p99 27.00 us`) — **4.7x faster**.
-- **Mixed Cache + Dynamic Miss + Attacks (`15,000` req):** `PrimostrataEdge` **`81,594 req/s`** (`p50 7.20 us`) vs `PurePythonEdge` `45,384 req/s` (`p50 17.80 us`) — **1.8x faster**.
-- **Uncached Dynamic Miss (`5,000` HTML 4792B `<script>` strip + compress + AEAD):** `PrimostrataEdge` `28,264 req/s` vs `PurePythonEdge (zlib C + OpenSSL)` `30,520 req/s`.
+- L4/L7 inspection (`20,000` req, 30% attacks): `346,494 req/s` (`p99 5.10 us`) vs `73,430 req/s` (`p99 27.00 us`)
+- Mixed workload (`15,000` req, cache hits + misses + attacks): `81,594 req/s` (`p50 7.20 us`) vs `45,384 req/s` (`p50 17.80 us`)
+- Uncached dynamic miss (`5,000` x 4792B HTML strip + compress + AEAD): `28,264 req/s` vs `30,520 req/s` (`zlib` + `cryptography`)
 
----
-
-## Reproduce Locally
+## Run tests and benchmarks
 
 ```bash
 python -m pytest -v tests/
@@ -116,4 +104,4 @@ python bench_compare.py
 python bench_external_intl.py
 ```
 
-Note: Prebuilt native binaries are included for **Windows `x86_64`** (`primostrata_edge/primostrata_edge.dll`) and **Linux `x86_64-unknown-linux-gnu`** (`primostrata_edge/libprimostrata_edge.so`). Source code for the underlying Rust engine is proprietary and excluded from this repository.
+Prebuilt native libraries are included for Windows x86_64 and Linux x86_64 (`primostrata_edge/`); Rust engine sources are closed.
