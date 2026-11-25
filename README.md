@@ -10,6 +10,8 @@ Fast HTTP/1.1 + binary `PRM1` web runtime and L4/L7 edge security SDK for Python
   - `middleware.py` — `PrimostrataEdgeMiddleware` for existing FastAPI/Starlette apps.
   - `primostrata_edge.dll` / `libprimostrata_edge.so` — prebuilt native core.
 - `pure_python_edge/` — functional equivalent in Python (`ipaddress`, `re`, `zlib`, `cryptography`, `OrderedDict`) implementing the same checks and pipeline.
+- `docs/` — [API Reference](docs/api.md) (including per-worker threading/DB pool behavior) and [Native Subsystems Architecture](docs/architecture.md).
+- `examples/concert_booking/` — full-stack ticket storefront (`HTML`/`JS`, SSR XSS stripping, atomic `SQLite WAL` orders, `k6`/`oha` comparison vs FastAPI + Uvicorn).
 - `tests/` — parity tests between native SDK and pure Python, HTTP/1.1 + `PRM1` server checks, `async/await` concurrency (`24` concurrent clients across `4` workers), and rate limits (`6/6` passing).
 - `bench_*.py` — reproducible benchmark scripts (`bench_compare.py`, `bench_top_python.py`, `bench_external_intl.py` for `oha` and `k6`).
 
@@ -90,6 +92,17 @@ Environment: Windows 11 x86_64, Python 3.14.7. Each server runs in its own isola
 
 *\*`k6` reports `0.00 ms` on Windows when median latency is sub-millisecond (`avg = 0.39 ms`).*
 
+### Full-stack website (`examples/concert_booking/`, HTML + SQLite WAL + XSS stripping)
+
+End-to-end storefront (`GET /`), SSR concert detail with `<script>` sanitization (`GET /concerts/{cid}`), SQLite WAL catalog read (`GET /api/concerts`), atomic `BEGIN IMMEDIATE` order write (`POST /api/orders`), and DB invariant check (`/api/audit`, `invariant_ok=True` across all runs):
+
+| Workload | `FastAPI+Uvicorn (w=4, no WAF)` | `FastAPI+Uvicorn (w=4, +WAF)` | `PrimostrataApp (w=4, +WAF)` |
+|---|---:|---:|---:|
+| `[oha]` Storefront `GET /` (`c=32`) | `6,144.0 req/s` (`p99 7.60 ms`) | `4,797.4 req/s` (`p99 11.52 ms`) | `91,550.1 req/s` (`p99 0.98 ms`) |
+| `[oha]` SQLite WAL read `GET /api/concerts` (`c=32`) | `3,923.8 req/s` (`p99 12.78 ms`) | `3,626.7 req/s` (`p99 20.17 ms`) | `11,169.4 req/s` (`p99 3.78 ms`) |
+| `[oha]` SQLite WAL write `POST /api/orders` (`c=16`) | `1,683.4 req/s` (`p99 94.24 ms`) | `815.1 req/s` (`p99 65.19 ms`) | `4,773.3 req/s` (`p99 7.94 ms`) |
+| `[k6]` Mixed site + L7 bots (`20 VUs`, 4s) | `3,463.6 req/s` (`p99 19.87 ms`) | `3,231.4 req/s` (`p99 33.46 ms`) | `13,266.8 req/s` (`p99 4.55 ms`) |
+
 ### In-process SDK vs `pure_python_edge` (`bench_compare.py`)
 
 - L4/L7 inspection (`20,000` req, 30% attacks): `346,494 req/s` (`p99 5.10 us`) vs `73,430 req/s` (`p99 27.00 us`)
@@ -102,6 +115,7 @@ Environment: Windows 11 x86_64, Python 3.14.7. Each server runs in its own isola
 python -m pytest -v tests/
 python bench_compare.py
 python bench_external_intl.py
+python -m examples.concert_booking.run_and_verify
 ```
 
 Prebuilt native libraries are included for Windows x86_64 and Linux x86_64 (`primostrata_edge/`); Rust engine sources are closed.
