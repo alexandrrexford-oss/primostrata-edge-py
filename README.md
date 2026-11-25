@@ -18,6 +18,18 @@ Compiled native Rust web runtime, **L4/L7 WAF (`SHIELD`)**, **per-core `REG 0.7`
 
 ---
 
+## Architecture Highlights (Public Overview)
+
+To keep the core engine proprietary while allowing any team to audit behavior and latency independently:
+
+- **Pre-GIL Edge Termination:** Non-blocking socket multiplexing, HTTP/1.1 framing, L4/L7 security checks (`SHIELD`), rate limiting, static responses, and edge cache hits all finish inside compiled native workers without acquiring the Python GIL.
+- **Per-Core Lock-Free Isolation:** Worker cores are routed by compact request/flow signatures (`REG 0.7`) and maintain their own pre-allocated compression scratch buffers and local response caches — eliminating cross-thread lock contention and cache-line bouncing on the hot path.
+- **Zero-Overhead Coroutine Dispatch:** `async def` handlers without runtime suspension run inline via fast coroutine stepping, while handlers that actually `await` async I/O offload cleanly onto a persistent background `asyncio` event loop without blocking socket workers.
+- **Dual-Protocol Single Port (`HTTP/1.1` + `PRM1`):** Standard HTTP clients (`curl`, browsers, `oha`, `k6`, `httpx`) and native `PrimostrataClient` binary streams share the same listening socket transparently, backed by `ZIN` lossless compression and RFC 8439 `ChaCha20-Poly1305` AEAD.
+- **Open Verification:** All security edge cases, functional roundtrips, pure-Python baseline comparisons, and external `oha` / `k6` benchmark harnesses are open in this repo so every claim is locally reproducible.
+
+---
+
 ## Quickstart
 
 ```python
