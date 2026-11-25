@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import os
+import sys
 from dataclasses import dataclass
 from typing import Iterable, Tuple
 
@@ -33,21 +34,21 @@ def _default_lib_path() -> str:
     if env_path and os.path.isfile(env_path):
         return env_path
     here = os.path.dirname(os.path.abspath(__file__))
-    candidates = [
-        os.path.join(here, "primostrata_edge.dll"),
-        os.path.join(here, "libprimostrata_edge.so"),
-        os.path.abspath(
-            os.path.join(here, "..", "rust_ffi", "target", "release", "primostrata_edge.dll")
-        ),
-        os.path.abspath(
-            os.path.join(here, "..", "rust_ffi", "target", "release", "libprimostrata_edge.so")
-        ),
+    if os.name == "nt":
+        names = ("primostrata_edge.dll",)
+    elif sys.platform == "darwin":
+        names = ("libprimostrata_edge.dylib", "libprimostrata_edge.so")
+    else:
+        names = ("libprimostrata_edge.so",)
+    candidates = [os.path.join(here, n) for n in names] + [
+        os.path.abspath(os.path.join(here, "..", "rust_ffi", "target", "release", n))
+        for n in names
     ]
     for c in candidates:
         if os.path.isfile(c):
             return c
     raise FileNotFoundError(
-        "Compiled Primostrata Edge binary not found. Expected primostrata_edge.dll / .so"
+        f"Compiled Primostrata Edge binary not found for {sys.platform}. Expected one of {names}"
     )
 
 

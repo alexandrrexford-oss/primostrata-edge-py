@@ -1,6 +1,6 @@
 # Primostrata Edge SDK for Python
 
-Compiled native Rust web runtime, **L4/L7 WAF (`SHIELD`)**, **per-core `REG 0.7` async I/O multiplexer**, **edge cache (`STORE64`)**, **`ZIN` lossless compression**, **`ChaCha20-Poly1305` AEAD**, and dual **`HTTP/1.1` + `PRM1` binary wire protocol** exposed as a standalone binary Python package (`primostrata_edge.dll`, Windows `x86_64` prebuilt included; core Rust engine sources remain proprietary).
+Compiled native Rust web runtime, **L4/L7 WAF (`SHIELD`)**, **per-core `REG 0.7` async I/O multiplexer**, **edge cache (`STORE64`)**, **`ZIN` lossless compression**, **`ChaCha20-Poly1305` AEAD**, and dual **`HTTP/1.1` + `PRM1` binary wire protocol** exposed as a standalone cross-platform binary Python package (prebuilt binaries included for **Windows `x86_64`** `.dll` and **Linux `x86_64-unknown-linux-gnu`** `.so`; core Rust engine sources remain proprietary).
 
 ---
 
@@ -104,4 +104,4 @@ python bench_compare.py
 python bench_external_intl.py
 ```
 
-Note: Prebuilt native binary included for **Windows `x86_64`** (`primostrata_edge/primostrata_edge.dll`). Source code for the underlying Rust engine is proprietary and excluded from this repository.
+Note: Prebuilt native binaries are included for **Windows `x86_64`** (`primostrata_edge/primostrata_edge.dll`) and **Linux `x86_64-unknown-linux-gnu`** (`primostrata_edge/libprimostrata_edge.so`). Source code for the underlying Rust engine is proprietary and excluded from this repository.
